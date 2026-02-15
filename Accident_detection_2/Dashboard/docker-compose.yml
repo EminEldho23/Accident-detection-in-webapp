@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: traffcon360-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: traffcon360
+      MONGO_INITDB_DATABASE: traffcon360
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d
+    networks:
+      - traffcon360
+
+  # MQTT Broker (Eclipse Mosquitto)
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: traffcon360-mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mqtt/config:/mosquitto/config
+      - ./mqtt/data:/mosquitto/data
+      - ./mqtt/log:/mosquitto/log
+    networks:
+      - traffcon360
+
+  # NestJS Backend
+  backend:
+    build:
+      context: ./backend-nest
+      dockerfile: Dockerfile
+    container_name: traffcon360-backend
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://admin:traffcon360@mongodb:27017/traffcon360?authSource=admin
+      MQTT_BROKER: mqtt://mqtt:1883
+      JWT_SECRET: traffcon360-production-secret-key-change-this
+      FASTAPI_URL: http://fastapi:8000
+    ports:
+      - "3001:3001"
+    depends_on:
+      - mongodb
+      - mqtt
+    volumes:
+      - ./backend-nest:/app
+      - /app/node_modules
+    networks:
+      - traffcon360
+
+  # FastAPI ML Service
+  fastapi:
+    build:
+      context: ./fastapi-ml
+      dockerfile: Dockerfile
+    container_name: traffcon360-fastapi
+    restart: unless-stopped
+    environment:
+      YOLO_MODEL_PATH: /app/models/best.pt
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./fastapi-ml:/app
+    networks:
+      - traffcon360
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend-react
+      dockerfile: Dockerfile
+    container_name: traffcon360-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    networks:
+      - traffcon360
+
+volumes:
+  mongodb_data:
+
+networks:
+  traffcon360:
+    driver: bridge

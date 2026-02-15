@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TRAFCON360 — Accident Detection Dashboard</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css" />
+</head>
+<body>
+  <!-- ═══ TOP BAR ═══ -->
+  <header id="topbar">
+    <div class="topbar-left">
+      <span class="logo">🚨</span>
+      <h1>TRAFCON<span class="accent">360</span></h1>
+      <span class="subtitle">Accident Detection Dashboard</span>
+    </div>
+    <div class="topbar-right">
+      <span id="backendStatus" class="badge badge-off">Backend Offline</span>
+      <span id="clock" class="clock"></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ═══ ALERT BANNER (appears on accident) ═══ -->
+    <div id="alertBanner" class="alert-banner hidden">
+      <div class="alert-icon">⚠️</div>
+      <div class="alert-text">
+        <strong>ACCIDENT DETECTED</strong> —
+        Lane <span id="alertLane">-</span> |
+        Confidence <span id="alertConf">-</span>%
+      </div>
+      <button id="alertDismiss" class="alert-dismiss" title="Dismiss">✕</button>
+    </div>
+
+    <!-- ═══ ROW 1: Latest detection ═══ -->
+    <section class="row">
+      <!-- Latest accident snapshot -->
+      <div class="card card-accident">
+        <h2>Latest Detection</h2>
+        <div id="accidentDisplay" class="accident-display">
+          <div id="noAccident" class="placeholder">
+            <span class="placeholder-icon">📷</span>
+            <p>No accident detected</p>
+          </div>
+          <img id="accidentImg" class="accident-img hidden" src="" alt="Accident" />
+        </div>
+        <div class="accident-meta">
+          <div class="meta-row">
+            <span class="meta-label">Status</span>
+            <span id="accStatus" class="meta-value badge badge-ok">Clear</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">Lane</span>
+            <span id="accLane" class="meta-value">—</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">Confidence</span>
+            <div class="confidence-bar-wrap">
+              <div id="confBar" class="confidence-bar" style="width:0%"></div>
+              <span id="confText" class="conf-text">0%</span>
+            </div>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">Time</span>
+            <span id="accTime" class="meta-value">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ ROW 2: Traffic signal overview ═══ -->
+    <section class="row row-signals">
+      <div class="card card-full">
+        <h2>Traffic Signal Status</h2>
+        <div class="signals-row">
+          <div class="signal-unit" id="signalUnit1">
+            <div class="signal-lamp">
+              <div class="lamp lamp-r" id="lamp1r"></div>
+              <div class="lamp lamp-y" id="lamp1y"></div>
+              <div class="lamp lamp-g" id="lamp1g"></div>
+            </div>
+            <div class="signal-label">Lane 1</div>
+            <div class="signal-state" id="sigState1">RED</div>
+          </div>
+          <div class="signal-unit" id="signalUnit2">
+            <div class="signal-lamp">
+              <div class="lamp lamp-r" id="lamp2r"></div>
+              <div class="lamp lamp-y" id="lamp2y"></div>
+              <div class="lamp lamp-g" id="lamp2g"></div>
+            </div>
+            <div class="signal-label">Lane 2</div>
+            <div class="signal-state" id="sigState2">RED</div>
+          </div>
+          <div class="signal-unit" id="signalUnit3">
+            <div class="signal-lamp">
+              <div class="lamp lamp-r" id="lamp3r"></div>
+              <div class="lamp lamp-y" id="lamp3y"></div>
+              <div class="lamp lamp-g" id="lamp3g"></div>
+            </div>
+            <div class="signal-label">Lane 3</div>
+            <div class="signal-state" id="sigState3">RED</div>
+          </div>
+          <div class="signal-unit" id="signalUnit4">
+            <div class="signal-lamp">
+              <div class="lamp lamp-r" id="lamp4r"></div>
+              <div class="lamp lamp-y" id="lamp4y"></div>
+              <div class="lamp lamp-g" id="lamp4g"></div>
+            </div>
+            <div class="signal-label">Lane 4</div>
+            <div class="signal-state" id="sigState4">RED</div>
+          </div>
+        </div>
+        <div id="emergencyBadge" class="emergency-badge hidden">
+          🚨 EMERGENCY MODE — Lane <span id="emergencyLane">-</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ ROW 3: Detection history ═══ -->
+    <section class="row row-history">
+      <div class="card card-full">
+        <div class="history-header">
+          <h2>Detection History</h2>
+          <button id="refreshHistory" class="btn-refresh" title="Refresh">🔄 Refresh</button>
+        </div>
+        <div id="historyGrid" class="history-grid">
+          <p class="placeholder-text">Loading history…</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═══ ALERT SOUND ═══ -->
+  <audio id="alertSound" preload="auto">
+    <source src="/static/alert.mp3" type="audio/mpeg" />
+  </audio>
+
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
