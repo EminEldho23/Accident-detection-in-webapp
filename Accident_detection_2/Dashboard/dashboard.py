@@ -23,10 +23,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 import httpx
 import uvicorn
+from typing import Optional
 
 # ── Configuration ──────────────────────────────────────────────────
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
-BACKEND_WS  = os.environ.get("BACKEND_WS", "ws://localhost:8000/ws/emergency")
+BACKEND_WS  = os.environ.get("BACKEND_WS", "ws://localhost:8000/ws/accident")
 DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", "5500"))
 
 # Where the detection backend saves annotated accident images
@@ -82,6 +83,61 @@ def get_detection_history(limit: int = 100):
             "display_time": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S"),
         })
     return history
+
+
+def _ensure_output_dir():
+    try:
+        os.makedirs(DETECTION_OUTPUT_DIR, exist_ok=True)
+    except Exception:
+        pass
+
+
+def save_accident_frame(accident: dict) -> Optional[str]:
+    """Save a base64-encoded frame from the backend to DETECTION_OUTPUT_DIR.
+    Returns the saved file path or None.
+    """
+    if not accident:
+        return None
+    frame_b64 = accident.get("frame") or accident.get("image")
+    if not frame_b64:
+        return None
+
+    # strip data URI prefix if present
+    if isinstance(frame_b64, str) and frame_b64.startswith("data:"):
+        try:
+            frame_b64 = frame_b64.split(",", 1)[1]
+        except Exception:
+            return None
+
+    try:
+        raw = base64.b64decode(frame_b64)
+    except Exception:
+        return None
+
+    _ensure_output_dir()
+
+    # Build filename: accident_lane{lane}_{ts}_{ms}.jpg
+    lane = accident.get("lane_id") or accident.get("lane") or "?"
+    try:
+        lane = str(lane)
+    except Exception:
+        lane = "?"
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    conf = accident.get("confidence") or accident.get("conf") or 0
+    try:
+        conf_s = f"{float(conf):.2f}"
+    except Exception:
+        conf_s = "0.00"
+
+    fname = f"accident_lane{lane}_{ts}_conf{conf_s}.jpg"
+    fpath = os.path.join(DETECTION_OUTPUT_DIR, fname)
+    try:
+        with open(fpath, "wb") as f:
+            f.write(raw)
+        return fpath
+    except Exception:
+        return None
 
 
 # ── API routes ─────────────────────────────────────────────────────
@@ -186,11 +242,126 @@ async def proxy_debug_trigger(lane_id: int = 1):
         return {"error": str(e)}
 
 
+# ── MAPQ Accident Queue proxies ───────────────────────────────────
+@app.post("/api/accident/clear/{lane_id}")
+async def proxy_accident_clear(lane_id: int):
+    """Proxy MAPQ accident clear to backend."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(f"{BACKEND_URL}/accident/clear/{lane_id}")
+            return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/accident/queue")
+async def proxy_accident_queue():
+    """Proxy MAPQ accident queue status from backend."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{BACKEND_URL}/accident/queue")
+            return r.json()
+    except Exception as e:
+        return {"queue": [], "active_lanes": [], "error": str(e)}
+
+
+# ── Number Plate Detection (ANPR) proxies ──────────────────────────
+@app.get("/api/number_plate/all_detected")
+async def proxy_npd_all_detected():
+    """Proxy all detected plates from backend."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{BACKEND_URL}/number_plate/all_detected")
+            return r.json()
+    except Exception as e:
+        return {"status": "error", "plates": [], "total": 0, "error": str(e)}
+
+
+@app.get("/api/number_plate/jobs")
+async def proxy_npd_jobs():
+    """Proxy ANPR processing jobs from backend."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{BACKEND_URL}/number_plate/jobs")
+            return r.json()
+    except Exception as e:
+        return {"status": "error", "jobs": {}, "error": str(e)}
+
+
+@app.get("/api/number_plate/job/{job_id}")
+async def proxy_npd_job(job_id: str):
+    """Proxy single job status + results from backend."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{BACKEND_URL}/number_plate/job/{job_id}")
+            return r.json()
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.get("/api/number_plate/results/{job_id}")
+async def proxy_npd_results(job_id: str):
+    """Proxy job results from backend."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{BACKEND_URL}/number_plate/results/{job_id}")
+            return r.json()
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/api/number_plate/detect_image")
+async def proxy_npd_detect_image(request: Request):
+    """Proxy image upload for plate detection to backend."""
+    try:
+        body = await request.body()
+        content_type = request.headers.get("content-type", "")
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                f"{BACKEND_URL}/number_plate/detect_image",
+                content=body,
+                headers={"content-type": content_type},
+            )
+            try:
+                data = r.json()
+            except Exception:
+                data = {"status": "ok", "raw": r.text}
+            return JSONResponse(data, status_code=r.status_code)
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=502)
+
+
+@app.post("/api/number_plate/upload_video")
+async def proxy_npd_upload_video(request: Request):
+    """Proxy video upload for plate detection to backend."""
+    try:
+        body = await request.body()
+        content_type = request.headers.get("content-type", "")
+        # Get query params (frame_skip, max_frames)
+        query = str(request.url.query)
+        url = f"{BACKEND_URL}/number_plate/upload_video"
+        if query:
+            url += f"?{query}"
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(
+                url,
+                content=body,
+                headers={"content-type": content_type},
+            )
+            try:
+                data = r.json()
+            except Exception:
+                data = {"status": "ok", "raw": r.text}
+            return JSONResponse(data, status_code=r.status_code)
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=502)
+
+
 # ── WebSocket relay ────────────────────────────────────────────────
 @app.websocket("/ws/dashboard")
 async def dashboard_ws(ws: WebSocket):
     """
-    Relays data from the backend WebSocket (/ws/emergency) to the dashboard,
+    Relays data from the backend WebSocket (/ws/accident) to the dashboard,
     enriched with accident_api data. Falls back to REST polling if WS is down.
     """
     await ws.accept()
@@ -210,7 +381,7 @@ async def dashboard_ws(ws: WebSocket):
                 r = await client.get(f"{BACKEND_URL}/signals")
                 return r.json()
         except Exception:
-            return {"signals": {}, "emergency": {"is_active": False, "lane_id": None}}
+            return {"signals": {}, "accident_mode": {"is_active": False, "priority_lane": None, "transition_phase": None}}
 
     # Keep retrying: WS when available, REST fallback when not
     while True:
@@ -225,11 +396,19 @@ async def dashboard_ws(ws: WebSocket):
                         data = None
 
                     accident = await _fetch_accident()
+                    # Save any frame included in the accident payload to the output folder
+                    try:
+                        save_accident_frame(accident)
+                    except Exception:
+                        pass
 
                     payload = {
                         "signals": data.get("signals", {}) if data else {},
-                        "emergency": data.get("emergency", {}) if data else {},
+                        "accident_mode": data.get("accident_mode", {}) if data else {},
                         "detections": data.get("detections", {}) if data else {},
+                        "accident_queue": data.get("accident_queue", []) if data else [],
+                        "active_accident_lanes": data.get("active_accident_lanes", []) if data else [],
+                        "license_plates": data.get("license_plates", {}) if data else {},
                         "accident": accident,
                         "backend_connected": data is not None,
                         "timestamp": datetime.now().isoformat(),
@@ -245,26 +424,34 @@ async def dashboard_ws(ws: WebSocket):
 
         # REST fallback: poll /signals + /accident_api
         try:
-            for _ in range(10):  # Try REST for ~10s then retry WS
-                accident = await _fetch_accident()
-                sig_data = await _fetch_signals()
+                for _ in range(10):  # Try REST for ~10s then retry WS
+                    accident = await _fetch_accident()
+                    # Save frame from REST-fetched accident payload
+                    try:
+                        save_accident_frame(accident)
+                    except Exception:
+                        pass
 
-                await ws.send_text(json.dumps({
-                    "signals": sig_data.get("signals", {}),
-                    "emergency": sig_data.get("emergency", {}),
-                    "detections": {},
-                    "accident": accident,
-                    "backend_connected": bool(sig_data.get("signals")),
-                    "timestamp": datetime.now().isoformat(),
-                }))
-                await asyncio.sleep(1)
+                    sig_data = await _fetch_signals()
+
+                    await ws.send_text(json.dumps({
+                        "signals": sig_data.get("signals", {}),
+                        "accident_mode": sig_data.get("accident_mode", {}),
+                        "detections": {},
+                        "accident_queue": sig_data.get("accident_queue", []),
+                        "active_accident_lanes": sig_data.get("active_accident_lanes", []),
+                        "accident": accident,
+                        "backend_connected": bool(sig_data.get("signals")),
+                        "timestamp": datetime.now().isoformat(),
+                    }))
+                    await asyncio.sleep(1)
         except WebSocketDisconnect:
             return
 
 
 # ── Run ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print(f"\n🚀 TRAFCON360 Dashboard starting on http://localhost:{DASHBOARD_PORT}")
-    print(f"📡 Detection backend: {BACKEND_URL}")
-    print(f"📁 Detection images:  {DETECTION_OUTPUT_DIR}\n")
+    print(f"\n[*] TRAFCON360 Dashboard starting on http://localhost:{DASHBOARD_PORT}")
+    print(f"[>] Detection backend: {BACKEND_URL}")
+    print(f"[D] Detection images:  {DETECTION_OUTPUT_DIR}\n")
     uvicorn.run("dashboard:app", host="0.0.0.0", port=DASHBOARD_PORT, reload=True)

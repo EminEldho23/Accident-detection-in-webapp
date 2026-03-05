@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TRAFCON360 — Accident Detection Dashboard</title>
   <link rel="stylesheet" href="/static/css/dashboard.css" />
 </head>
+
 <body>
   <!-- ═══ TOP BAR ═══ -->
   <header id="topbar">
@@ -21,6 +23,15 @@
   </header>
 
   <main>
+    <!-- ═══ SAFETY SEQUENCE BANNER (appears during Yellow→Red→Recovery transition) ═══ -->
+    <div id="safetyBanner" class="alert-banner safety-banner hidden">
+      <div class="alert-icon">🚨</div>
+      <div class="alert-text">
+        <strong>SAFETY SEQUENCE ACTIVE</strong> —
+        <span id="safetyPhaseText">Standby</span>
+      </div>
+    </div>
+
     <!-- ═══ ALERT BANNER (appears on accident) ═══ -->
     <div id="alertBanner" class="alert-banner hidden">
       <div class="alert-icon">⚠️</div>
@@ -64,7 +75,41 @@
             <span class="meta-label">Time</span>
             <span id="accTime" class="meta-value">—</span>
           </div>
+          <!-- Vehicle & Owner Info -->
+          <div class="meta-row" id="vehicleRow" style="display: none;">
+            <span class="meta-label">Vehicle</span>
+            <span id="accPlate" class="meta-value" style="font-family: monospace; font-weight: bold;">—</span>
+          </div>
+          <div class="meta-row" id="ownerRow" style="display: none;">
+            <span class="meta-label">Owner</span>
+            <span id="accOwner" class="meta-value">—</span>
+          </div>
+          <div class="meta-row" id="phoneRow" style="display: none;">
+            <span class="meta-label">Phone</span>
+            <span id="accPhone" class="meta-value">—</span>
+          </div>
+
         </div>
+
+        <!-- ANPR Plate Preview (shown when plate crops are available) -->
+        <div id="anprPreview" class="anpr-preview hidden">
+          <h3 class="anpr-title">🔖 ANPR Plate Preview</h3>
+          <div class="anpr-crops">
+            <div class="anpr-crop-box">
+              <p class="crop-label">Raw Crop</p>
+              <img id="rawCropImg" src="" alt="Raw plate crop" />
+            </div>
+            <div class="anpr-crop-box">
+              <p class="crop-label">Processed (PRD Pipeline)</p>
+              <img id="procCropImg" src="" alt="Processed plate crop" />
+            </div>
+          </div>
+          <div class="anpr-conf-row">
+            <span class="crop-label">OCR Confidence:</span>
+            <span id="anprConfBadge" class="anpr-conf-badge">—</span>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -110,13 +155,74 @@
             <div class="signal-state" id="sigState4">RED</div>
           </div>
         </div>
-        <div id="emergencyBadge" class="emergency-badge hidden">
-          🚨 EMERGENCY MODE — Lane <span id="emergencyLane">-</span>
+        <div id="accidentBadge" class="accident-badge hidden">
+          🚨 MAPQ ACTIVE — Priority Lane <span id="accidentLane">-</span>
         </div>
       </div>
     </section>
 
-    <!-- ═══ ROW 3: Detection history ═══ -->
+    <!-- ═══ ROW 2.5: MAPQ Accident Stack ═══ -->
+    <section class="row row-mapq">
+      <div class="card card-full">
+        <h2>🚧 Accident Priority Queue (MAPQ)</h2>
+        <div id="mapqStack" class="mapq-stack">
+          <p class="placeholder-text" id="mapqEmpty">No active accidents — Normal Mode</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ ROW 3: Number Plate Detection ═══ -->
+    <section class="row row-plates">
+      <div class="card card-full">
+        <div class="plates-header">
+          <h2>🔖 Number Plate Detection (ANPR)</h2>
+          <div class="plates-controls">
+            <label class="btn-upload" for="npd-image-input" title="Detect plates in an image">
+              🖼️ Detect Image
+            </label>
+            <input type="file" id="npd-image-input" accept="image/*" style="display:none" />
+            <label class="btn-upload" for="npd-video-input" title="Process video for plates">
+              🎬 Process Video
+            </label>
+            <input type="file" id="npd-video-input" accept="video/*" style="display:none" />
+            <button id="refreshPlates" class="btn-refresh" title="Refresh">🔄</button>
+          </div>
+        </div>
+
+        <!-- Annotated image result -->
+        <div id="npdImageResult" class="npd-image-result hidden">
+          <img id="npdAnnotatedImg" src="" alt="Annotated" class="npd-annotated-img" />
+          <button id="npdCloseResult" class="npd-close-btn" title="Close">✕</button>
+        </div>
+
+        <!-- Detected plates table -->
+        <div id="platesTable" class="plates-table-wrap">
+          <table class="plates-table">
+            <thead>
+              <tr>
+                <th>Plate Number</th>
+                <th>Confidence</th>
+                <th>Source</th>
+                <th>Car ID</th>
+              </tr>
+            </thead>
+            <tbody id="platesBody">
+              <tr>
+                <td colspan="4" class="placeholder-text">No plates detected yet</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Job progress -->
+        <div id="npdJobsSection" class="npd-jobs-section hidden">
+          <h3>Processing Jobs</h3>
+          <div id="npdJobsList" class="npd-jobs-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ ROW 4: Detection history ═══ -->
     <section class="row row-history">
       <div class="card card-full">
         <div class="history-header">
@@ -137,4 +243,5 @@
 
   <script src="/static/js/dashboard.js"></script>
 </body>
+
 </html>

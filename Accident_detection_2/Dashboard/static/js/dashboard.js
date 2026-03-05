@@ -6,32 +6,39 @@
 const DASH_WS = `ws://${location.host}/ws/dashboard`;
 
 // ── DOM refs ────────────────────────────────────────
-const $  = (s) => document.querySelector(s);
+const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
-const alertBanner   = $("#alertBanner");
-const alertLane     = $("#alertLane");
-const alertConf     = $("#alertConf");
-const alertDismiss  = $("#alertDismiss");
-const accImg        = $("#accidentImg");
-const accDisplay    = $("#accidentDisplay");
-const noAccident    = $("#noAccident");
-const accStatus     = $("#accStatus");
-const accLane       = $("#accLane");
-const confBar       = $("#confBar");
-const confText      = $("#confText");
-const accTime       = $("#accTime");
-const backendBadge  = $("#backendStatus");
-const clock         = $("#clock");
-const emerBadge     = $("#emergencyBadge");
-const emerLane      = $("#emergencyLane");
-const historyGrid   = $("#historyGrid");
+const alertBanner = $("#alertBanner");
+const alertLane = $("#alertLane");
+const alertConf = $("#alertConf");
+const alertDismiss = $("#alertDismiss");
+const accImg = $("#accidentImg");
+const accDisplay = $("#accidentDisplay");
+const noAccident = $("#noAccident");
+const accStatus = $("#accStatus");
+const accLane = $("#accLane");
+const confBar = $("#confBar");
+const confText = $("#confText");
+const accTime = $("#accTime");
+const accPlate = $("#accPlate");
+const accOwner = $("#accOwner");
+const accPhone = $("#accPhone");
+const vehicleRow = $("#vehicleRow");
+const ownerRow = $("#ownerRow");
+const phoneRow = $("#phoneRow");
+
+const backendBadge = $("#backendStatus");
+const clock = $("#clock");
+const accidentBadge = $("#accidentBadge");
+const accidentLane = $("#accidentLane");
+const historyGrid = $("#historyGrid");
 
 // ── State ───────────────────────────────────────────
-let lastAccidentLane   = null;
+let lastAccidentLane = null;
 let alertDismissedTime = 0;
-let alertAudioCtx      = null;
-let accidentSeen       = false;
+let alertAudioCtx = null;
+let accidentSeen = false;
 
 // ── Clock ───────────────────────────────────────────
 function tickClock() {
@@ -44,7 +51,7 @@ tickClock();
 function playAlert() {
   try {
     if (!alertAudioCtx) alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc  = alertAudioCtx.createOscillator();
+    const osc = alertAudioCtx.createOscillator();
     const gain = alertAudioCtx.createGain();
     osc.connect(gain);
     gain.connect(alertAudioCtx.destination);
@@ -54,7 +61,7 @@ function playAlert() {
     gain.gain.setValueAtTime(0.25, alertAudioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, alertAudioCtx.currentTime + 0.5);
     osc.start(); osc.stop(alertAudioCtx.currentTime + 0.5);
-  } catch (_) {}
+  } catch (_) { }
 }
 
 // ── Dismiss alert ───────────────────────────────────
@@ -98,6 +105,61 @@ function updateAccident(accident) {
     confText.textContent = `${conf}%`;
     accTime.textContent = new Date().toLocaleTimeString();
 
+    // Vehicle & Owner Info
+    if (accident.plate) {
+      accPlate.textContent = accident.plate;
+      // Pulse effect when still scanning for plates
+      if (accident.plate === "SCANNING...") {
+        accPlate.classList.add("scanning");
+      } else {
+        accPlate.classList.remove("scanning");
+      }
+      vehicleRow.style.display = "flex";
+    } else {
+      vehicleRow.style.display = "none";
+    }
+
+    if (accident.owner_name) {
+      accOwner.textContent = accident.owner_name + (accident.vehicle_model ? ` (${accident.vehicle_model})` : '');
+      ownerRow.style.display = "flex";
+    } else {
+      ownerRow.style.display = "none";
+    }
+
+    if (accident.owner_phone) {
+      accPhone.textContent = accident.owner_phone;
+      phoneRow.style.display = "flex";
+    } else {
+      phoneRow.style.display = "none";
+    }
+
+    // ANPR Plate Preview
+    const anprPreview = $("#anprPreview");
+    if (anprPreview) {
+      if (accident.plate_raw_crop || accident.plate_processed_crop) {
+        anprPreview.classList.remove("hidden");
+        const rawImg = $("#rawCropImg");
+        const procImg = $("#procCropImg");
+        if (rawImg && accident.plate_raw_crop)
+          rawImg.src = `data:image/jpeg;base64,${accident.plate_raw_crop}`;
+        if (procImg && accident.plate_processed_crop)
+          procImg.src = `data:image/png;base64,${accident.plate_processed_crop}`;
+        // Confidence badge
+        const plateConf = accident.plate_confidence != null ? accident.plate_confidence : 0;
+        const badge = $("#anprConfBadge");
+        if (badge) {
+          badge.textContent = `${Math.round(plateConf * 100)}%`;
+          badge.className = plateConf < 0.60
+            ? "anpr-conf-badge review"
+            : "anpr-conf-badge ok";
+        }
+      } else {
+        anprPreview.classList.add("hidden");
+      }
+    }
+
+
+
     // Alert banner (only if the lane changed or >10s since last dismiss)
     if (lane !== lastAccidentLane || Date.now() - alertDismissedTime > 10000) {
       alertBanner.classList.remove("hidden");
@@ -113,19 +175,95 @@ function updateAccident(accident) {
       accStatus.textContent = "Clear";
       accStatus.className = "meta-value badge badge-ok";
       accDisplay.classList.remove("active-border");
+
+      vehicleRow.style.display = "none";
+      ownerRow.style.display = "none";
+      phoneRow.style.display = "none";
+
+      const anprPreview = $("#anprPreview");
+      if (anprPreview) anprPreview.classList.add("hidden");
     }
   }
 }
 
-// ── Update emergency state ──────────────────────────
-function updateEmergency(emergency) {
-  if (emergency && emergency.is_active) {
-    emerBadge.classList.remove("hidden");
-    emerLane.textContent = emergency.lane_id || "?";
+// ── Update accident mode state ──────────────────────────
+function updateAccidentMode(accidentMode) {
+  if (accidentMode && accidentMode.is_active) {
+    accidentBadge.classList.remove("hidden");
+    accidentLane.textContent = accidentMode.priority_lane || "?";
   } else {
-    emerBadge.classList.add("hidden");
+    accidentBadge.classList.add("hidden");
+  }
+
+  // Safety Sequence Banner
+  const safetyBanner = $("#safetyBanner");
+  const safetyPhaseText = $("#safetyPhaseText");
+  if (safetyBanner && accidentMode && accidentMode.transition_phase) {
+    safetyBanner.classList.remove("hidden");
+    const phaseLabels = {
+      "CAUTION": "⚠️ Stage 1 — YELLOW CAUTION (2s)",
+      "HALT": "🛑 Stage 2 — ALL-RED SAFETY HALT (5s)",
+      "RECOVERY": "✅ Stage 3 — RESUMING NORMAL MODE"
+    };
+    if (safetyPhaseText) {
+      safetyPhaseText.textContent = phaseLabels[accidentMode.transition_phase] || accidentMode.transition_phase;
+    }
+  } else if (safetyBanner) {
+    safetyBanner.classList.add("hidden");
   }
 }
+
+// ── MAPQ: Update Accident Queue Stack ──────────────────────────
+function updateAccidentQueue(queue) {
+  if (!queue || queue.length === 0) {
+    if (mapqEmpty) mapqEmpty.style.display = "block";
+    // Remove any existing queue items
+    mapqStack.querySelectorAll(".mapq-item").forEach(el => el.remove());
+    return;
+  }
+
+  if (mapqEmpty) mapqEmpty.style.display = "none";
+
+  // Build the queue HTML
+  const html = queue.map((item, idx) => {
+    const statusClass = item.status === "RESPONDING" ? "mapq-responding" : "mapq-waiting";
+    const statusIcon = item.status === "RESPONDING" ? "🟢" : "🔴";
+    const elapsed = item.elapsed_seconds ? `${Math.round(item.elapsed_seconds)}s ago` : "just now";
+    const conf = item.confidence ? `${Math.round(item.confidence * 100)}%` : "?";
+    return `<div class="mapq-item ${statusClass}">
+      <div class="mapq-item-info">
+        <span class="mapq-lane">${statusIcon} Lane ${item.lane_id}</span>
+        <span class="mapq-status-badge">${item.status}</span>
+      </div>
+      <div class="mapq-item-meta">
+        <span>Conf: ${conf}</span>
+        <span>${elapsed}</span>
+        <button class="mapq-clear-btn" onclick="clearAccidentLane(${item.lane_id})" title="Clear this lane">✓ Clear</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  // Only update if content changed (avoid flicker)
+  const currentItems = mapqStack.querySelectorAll(".mapq-item");
+  if (currentItems.length !== queue.length || mapqStack.innerHTML.indexOf(html) === -1) {
+    // Keep mapqEmpty in place
+    mapqStack.querySelectorAll(".mapq-item").forEach(el => el.remove());
+    mapqStack.insertAdjacentHTML("beforeend", html);
+  }
+}
+
+// ── MAPQ: Clear accident lane from dashboard ────────
+async function clearAccidentLane(laneId) {
+  try {
+    const res = await fetch(`/api/accident/clear/${laneId}`, { method: "POST" });
+    const data = await res.json();
+    console.log(`MAPQ: Lane ${laneId} clear response:`, data);
+  } catch (e) {
+    console.warn("Failed to clear lane:", e);
+  }
+}
+// Make globally accessible for onclick
+window.clearAccidentLane = clearAccidentLane;
 
 // ── WebSocket connection ────────────────────────────
 let ws = null;
@@ -152,7 +290,9 @@ function connectWS() {
       }
       if (data.signals) updateSignals(data.signals);
       if (data.accident) updateAccident(data.accident);
-      if (data.emergency) updateEmergency(data.emergency);
+      if (data.accident_mode) updateAccidentMode(data.accident_mode);
+      if (data.accident_queue !== undefined) updateAccidentQueue(data.accident_queue);
+      if (data.license_plates) updateLivePlates(data.license_plates);
     } catch (e) {
       console.warn("WS parse error:", e);
     }
@@ -177,7 +317,7 @@ setInterval(async () => {
     const res = await fetch("/api/accident");
     const data = await res.json();
     updateAccident(data);
-  } catch (_) {}
+  } catch (_) { }
 }, 2000);
 
 // ── Detection history ───────────────────────────────
@@ -229,3 +369,200 @@ $("#lightbox").addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeLightbox();
 });
+
+/* ═══════════════════════════════════════════════════
+   NUMBER PLATE DETECTION (ANPR) SECTION
+   ═══════════════════════════════════════════════════ */
+
+const platesBody = $("#platesBody");
+const npdImageInput = $("#npd-image-input");
+const npdVideoInput = $("#npd-video-input");
+const npdImageResult = $("#npdImageResult");
+const npdAnnotatedImg = $("#npdAnnotatedImg");
+const npdCloseResult = $("#npdCloseResult");
+const npdJobsSection = $("#npdJobsSection");
+const npdJobsList = $("#npdJobsList");
+const refreshPlatesBtn = $("#refreshPlates");
+
+// ── Fetch all detected plates ───────────────────────
+// ── Update live plates from WebSocket ────────────────
+function updateLivePlates(licensePlates) {
+  if (!licensePlates || typeof licensePlates !== 'object') return;
+  const liveRows = [];
+  for (const [laneId, detections] of Object.entries(licensePlates)) {
+    if (!Array.isArray(detections)) continue;
+    for (const d of detections) {
+      if (d.plate_text) {
+        liveRows.push({
+          plate_text: d.plate_text,
+          confidence: d.text_score || d.plate_score || 0,
+          source: `Lane ${laneId}`,
+          car_id: d.car_id
+        });
+      }
+    }
+  }
+  if (liveRows.length > 0 && platesBody) {
+    platesBody.innerHTML = liveRows.map(p => `
+      <tr>
+        <td><span class="plate-badge">${p.plate_text}</span></td>
+        <td><span class="conf-badge">${Math.round((p.confidence || 0) * 100)}%</span></td>
+        <td><span class="source-tag">${p.source}</span></td>
+        <td>${p.car_id != null && p.car_id !== -1 ? '#' + p.car_id : '—'}</td>
+      </tr>
+    `).join("");
+  }
+}
+
+async function loadPlates() {
+  try {
+    const res = await fetch("/api/number_plate/all_detected");
+    const data = await res.json();
+    const plates = data.plates || [];
+
+    if (plates.length === 0) {
+      platesBody.innerHTML = '<tr><td colspan="4" class="placeholder-text">No plates detected yet</td></tr>';
+    } else {
+      platesBody.innerHTML = plates.map(p => `
+        <tr>
+          <td><span class="plate-badge">${p.plate_text}</span></td>
+          <td><span class="conf-badge">${Math.round((p.confidence || 0) * 100)}%</span></td>
+          <td><span class="source-tag">${(p.source || '').replace('live_lane_', 'Lane ').replace('job_', 'Job ')}</span></td>
+          <td>${p.car_id != null && p.car_id !== -1 ? '#' + p.car_id : '—'}</td>
+        </tr>
+      `).join("");
+    }
+  } catch (e) {
+    console.warn("Failed to load plates:", e);
+  }
+}
+
+// ── Fetch ANPR processing jobs ──────────────────────
+async function loadJobs() {
+  try {
+    const res = await fetch("/api/number_plate/jobs");
+    const data = await res.json();
+    const jobs = data.jobs || {};
+    const ids = Object.keys(jobs);
+
+    if (ids.length === 0) {
+      npdJobsSection.classList.add("hidden");
+      return;
+    }
+
+    npdJobsSection.classList.remove("hidden");
+
+    npdJobsList.innerHTML = ids.reverse().map(id => {
+      const j = jobs[id];
+      const statusCls = j.status === 'completed' ? 'completed'
+        : j.status === 'error' ? 'error' : 'processing';
+      const statusIcon = j.status === 'completed' ? '✅'
+        : j.status === 'error' ? '❌' : '⏳';
+
+      let progress = '';
+      if (j.status === 'processing') {
+        progress = `<div class="npd-progress-bar"><div class="npd-progress-fill" style="width:${j.progress || 0}%"></div></div>`;
+      }
+
+      let results = '';
+      if (j.status === 'completed' && j.plates_found > 0) {
+        results = `<div class="npd-job-results" id="job-results-${id}">
+          <span class="source-tag">${j.plates_found} plate${j.plates_found !== 1 ? 's' : ''} found</span>
+        </div>`;
+      }
+
+      return `<div class="npd-job-card">
+        <div class="npd-job-info">
+          <span class="npd-job-id">${statusIcon} Job ${id}</span>
+          <span class="npd-job-file">${j.video || 'Unknown file'}</span>
+        </div>
+        <span class="npd-job-status ${statusCls}">${j.status} ${j.status === 'processing' ? (j.progress?.toFixed(0) || 0) + '%' : ''}</span>
+        ${progress}
+        ${results}
+      </div>`;
+    }).join("");
+
+  } catch (e) {
+    console.warn("Failed to load jobs:", e);
+  }
+}
+
+// ── Image upload for plate detection ────────────────
+if (npdImageInput) {
+  npdImageInput.addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/number_plate/detect_image", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (data.annotated_image) {
+        npdAnnotatedImg.src = `data:image/jpeg;base64,${data.annotated_image}`;
+        npdImageResult.classList.remove("hidden");
+      }
+
+      // Refresh plates table to show new detections
+      if (data.detections?.length > 0) {
+        loadPlates();
+      }
+    } catch (err) {
+      console.error("Image detection failed:", err);
+    }
+    // Reset input so same file can be uploaded again
+    npdImageInput.value = "";
+  });
+}
+
+// ── Video upload for plate detection ────────────────
+if (npdVideoInput) {
+  npdVideoInput.addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/number_plate/upload_video?frame_skip=3", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      console.log("Video upload response:", data);
+      // Jobs will auto-refresh
+      loadJobs();
+    } catch (err) {
+      console.error("Video upload failed:", err);
+    }
+    npdVideoInput.value = "";
+  });
+}
+
+// ── Close annotated image result ────────────────────
+if (npdCloseResult) {
+  npdCloseResult.addEventListener("click", () => {
+    npdImageResult.classList.add("hidden");
+    npdAnnotatedImg.src = "";
+  });
+}
+
+// ── Refresh plates button ───────────────────────────
+if (refreshPlatesBtn) {
+  refreshPlatesBtn.addEventListener("click", () => {
+    loadPlates();
+    loadJobs();
+  });
+}
+
+// ── Auto-refresh plates and jobs ────────────────────
+loadPlates();
+loadJobs();
+setInterval(loadPlates, 5000);
+setInterval(loadJobs, 3000);
