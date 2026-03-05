@@ -383,6 +383,27 @@ async def dashboard_ws(ws: WebSocket):
         except Exception:
             return {"signals": {}, "accident_mode": {"is_active": False, "priority_lane": None, "transition_phase": None}}
 
+    async def _fetch_plates():
+        try:
+            async with httpx.AsyncClient(timeout=1) as client:
+                r = await client.get(f"{BACKEND_URL}/number_plate/all_detected")
+                data = r.json()
+                # Convert to {lane_id: [plate_dicts]} format for updateLivePlates
+                plates_by_lane = {}
+                for p in data.get("plates", []):
+                    src = p.get("source", "")
+                    lane_key = src.replace("live_lane_", "lane").replace("pre_accident_lane_", "lane")
+                    if not lane_key.startswith("lane"):
+                        lane_key = "lane0"
+                    plates_by_lane.setdefault(lane_key, []).append({
+                        "plate": p.get("plate_text"),
+                        "confidence": p.get("confidence", 0),
+                        "car_id": p.get("car_id"),
+                    })
+                return plates_by_lane
+        except Exception:
+            return {}
+
     # Keep retrying: WS when available, REST fallback when not
     while True:
         # Try WebSocket relay
@@ -433,6 +454,7 @@ async def dashboard_ws(ws: WebSocket):
                         pass
 
                     sig_data = await _fetch_signals()
+                    plates_data = await _fetch_plates()
 
                     await ws.send_text(json.dumps({
                         "signals": sig_data.get("signals", {}),
@@ -440,6 +462,7 @@ async def dashboard_ws(ws: WebSocket):
                         "detections": {},
                         "accident_queue": sig_data.get("accident_queue", []),
                         "active_accident_lanes": sig_data.get("active_accident_lanes", []),
+                        "license_plates": plates_data,
                         "accident": accident,
                         "backend_connected": bool(sig_data.get("signals")),
                         "timestamp": datetime.now().isoformat(),

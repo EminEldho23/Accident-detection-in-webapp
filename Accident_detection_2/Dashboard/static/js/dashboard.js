@@ -386,32 +386,64 @@ const refreshPlatesBtn = $("#refreshPlates");
 
 // ── Fetch all detected plates ───────────────────────
 // ── Update live plates from WebSocket ────────────────
-function updateLivePlates(licensePlates) {
-  if (!licensePlates || typeof licensePlates !== 'object') return;
-  const liveRows = [];
-  for (const [laneId, detections] of Object.entries(licensePlates)) {
-    if (!Array.isArray(detections)) continue;
-    for (const d of detections) {
-      if (d.plate_text) {
-        liveRows.push({
-          plate_text: d.plate_text,
-          confidence: d.text_score || d.plate_score || 0,
-          source: `Lane ${laneId}`,
-          car_id: d.car_id
-        });
-      }
-    }
+// Persistent client-side plate accumulator (survives between WS messages)
+let accumulatedPlates = {};
+
+function renderPlates() {
+  const rows = Object.values(accumulatedPlates);
+  if (rows.length === 0) {
+    if (platesBody) platesBody.innerHTML = '<tr><td colspan="4" class="placeholder-text">No plates detected yet</td></tr>';
+    return;
   }
-  if (liveRows.length > 0 && platesBody) {
-    platesBody.innerHTML = liveRows.map(p => `
+  
+  // Sort by timestamp descending (newest at top)
+  rows.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  
+  if (platesBody) {
+    platesBody.innerHTML = rows.map(p => `
       <tr>
         <td><span class="plate-badge">${p.plate_text}</span></td>
         <td><span class="conf-badge">${Math.round((p.confidence || 0) * 100)}%</span></td>
-        <td><span class="source-tag">${p.source}</span></td>
+        <td><span class="source-tag">${(p.source || '').replace('live_lane_', 'Lane ').replace('pre_accident_lane_', 'Lane ').replace('job_', 'Job ')}</span></td>
         <td>${p.car_id != null && p.car_id !== -1 ? '#' + p.car_id : '—'}</td>
       </tr>
     `).join("");
   }
+}
+
+function updateLivePlates(licensePlates) {
+  if (!licensePlates || typeof licensePlates !== 'object') return;
+  let hasNew = false;
+  const now = Date.now();
+  for (const [laneKey, detections] of Object.entries(licensePlates)) {
+    if (!Array.isArray(detections)) continue;
+    // Extract lane number from key like "lane1" → "1"
+    const laneNum = laneKey.replace(/\D/g, '') || laneKey;
+    for (const d of detections) {
+      // Backend WS sends "plate" and "confidence" keys
+      const plateText = d.plate || d.plate_text;
+      const conf = d.confidence || d.text_score || d.plate_score || 0;
+      if (plateText) {
+        // Accumulate: keep highest confidence, but preserve newest timestamp at top
+        if (!accumulatedPlates[plateText]) {
+          accumulatedPlates[plateText] = {
+            plate_text: plateText,
+            confidence: conf,
+            source: \`Lane ${laneNum}\`,
+            car_id: d.car_id,
+            timestamp: now
+          };
+          hasNew = true;
+        } else if (conf > accumulatedPlates[plateText].confidence) {
+          accumulatedPlates[plateText].confidence = conf;
+          // Optionally update timestamp if you want to bump when confidence improves
+          accumulatedPlates[plateText].timestamp = now;
+          hasNew = true;
+        }
+      }
+    }
+  }
+  if (hasNew) renderPlates();
 }
 
 async function loadPlates() {
@@ -420,18 +452,24 @@ async function loadPlates() {
     const data = await res.json();
     const plates = data.plates || [];
 
-    if (plates.length === 0) {
-      platesBody.innerHTML = '<tr><td colspan="4" class="placeholder-text">No plates detected yet</td></tr>';
-    } else {
-      platesBody.innerHTML = plates.map(p => `
-        <tr>
-          <td><span class="plate-badge">${p.plate_text}</span></td>
-          <td><span class="conf-badge">${Math.round((p.confidence || 0) * 100)}%</span></td>
-          <td><span class="source-tag">${(p.source || '').replace('live_lane_', 'Lane ').replace('job_', 'Job ')}</span></td>
-          <td>${p.car_id != null && p.car_id !== -1 ? '#' + p.car_id : '—'}</td>
-        </tr>
-      `).join("");
-    }
+    let hasNew = false;
+    // Merge from backend source of truth
+    plates.forEach(p => {
+      const pt = p.plate_text;
+      const ts = (p.timestamp || 0) * 1000; // backend sends seconds, JS uses ms
+      if (!accumulatedPlates[pt] || p.confidence > accumulatedPlates[pt].confidence) {
+        accumulatedPlates[pt] = {
+          plate_text: pt,
+          confidence: p.confidence,
+          source: p.source,
+          car_id: p.car_id,
+          timestamp: ts || Date.now()
+        };
+        hasNew = true;
+      }
+    });
+    
+    if (hasNew || plates.length === 0) renderPlates();
   } catch (e) {
     console.warn("Failed to load plates:", e);
   }
